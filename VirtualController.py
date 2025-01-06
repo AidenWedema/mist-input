@@ -3,25 +3,91 @@ from pynput.keyboard import Controller as KeyboardController, Key
 from pynput.mouse import Controller as MouseController
 from ControllerLayouts import GetControllerLayout
 
+class Keybind:
+    def __init__(self, keyboard: KeyboardController=KeyboardController(), mouse: MouseController=MouseController()):
+        self.bound_key = None                               # The key bound to this keybind
+        self.is_pressed = False                             # Whether the key is currently pressed on the keyboard
+        self.keyboard = keyboard                            # The keyboard controller to use for simulating input
+        self.mouse = mouse                                  # The mouse controller to use for simulating input
+
+    def bind_key(self, key):
+        self.bound_key = self.tkinter_key_to_pynput_key(key) if type(key) != type(Key) else key
+
+    def clear_key(self):
+        self.bound_key = None
+        
+    def start(self):
+        self.is_pressed = True
+        self.simulate_input()
+        
+    def stop(self):
+        self.is_pressed = False
+        self.simulate_input()
+
+    def simulate_input(self):
+        if not self.bound_key:
+            return
+        try:
+            if self.is_pressed:
+                self.keyboard.press(self.bound_key)
+                self.is_pressed = True
+            else:
+                self.keyboard.release(self.bound_key)
+                self.is_pressed = False
+        except Exception as e:
+            print(f"Error simulating input for {self.bound_key}: {e}")
+            
+    def tkinter_key_to_pynput_key(self, key):
+        key = key.lower()
+        if hasattr(Key, key):
+            key = getattr(Key, key, None)
+        else:
+            key_translations = {'escape': Key.esc, 'return': Key.enter}
+            key = key_translations.get(key, key)
+        return key
+
 class Controller:
-    class Button:
+    class Input:
+        def __init__(self, name: str):
+            self.name = name            # The name of the input
+            self.keybind = None         # The keybind associated with the input.This is a Keybind object for Button and Trigger inputs and a dictionary of Keybind objects for Axis inputs
+            self.changed = False        # Whether the input has changed state since the last poll
+            
+    class Button(Input):
         def __init__(self, name: str, input: int):
-            self.name = name
+            super().__init__(name)
             self.input = input
             self.pressed = False
+            self.last_pressed = False
+            self.keybind = Keybind()
             
         def update(self, joystick: pygame.joystick):
+            self.last_pressed = self.pressed
             self.pressed = joystick.get_button(self.input)
+            self.changed = self.last_pressed != self.pressed
+            
+            if self.changed:
+                if self.pressed:
+                    self.keybind.start()
+                else:
+                    self.keybind.stop()
 
-    class Axis:
+    class Axis(Input):
         def __init__(self, name: str, inputX: int, inputY: int, deadzone: float = 0.1):
-            self.name = name
+            super().__init__(name)
             self.inputX = inputX
             self.inputY = inputY
+            self.deadzone = deadzone
             self.X = 0
             self.Y = 0
-            self.deadzone = deadzone
             self.direction = (0, 0)
+            self.last_direction = (0, 0)
+            self.keybind = {
+                "up": Keybind(),
+                "down": Keybind(),
+                "left": Keybind(),
+                "right": Keybind(),
+            }
             
         def update(self, joystick: pygame.joystick):
             raw_x = joystick.get_axis(self.inputX)
@@ -31,51 +97,66 @@ class Controller:
             self.X = raw_x if abs(raw_x) > self.deadzone else 0
             self.Y = raw_y if abs(raw_y) > self.deadzone else 0
             
+            self.last_direction = self.direction
             self.direction = (
                 -1 if self.Y < -self.deadzone else (1 if self.Y > self.deadzone else 0),
                 -1 if self.X < -self.deadzone else (1 if self.X > self.deadzone else 0),
             )
-            #self.button.update(joystick)
+            self.changed = (self.direction[0] != self.last_direction[0], self.direction[1] != self.last_direction[1])
             
-    class Trigger:
+            if self.changed[0]:
+                if self.direction[0] == 1:
+                    self.keybind["up"].start()
+                    self.keybind["down"].stop()
+                elif self.direction[0] == -1:
+                    self.keybind["down"].start()
+                    self.keybind["up"].stop()
+                else:
+                    self.keybind["up"].stop()
+                    self.keybind["down"].stop()
+            if self.changed[1]:
+                if self.direction[1] == 1:
+                    self.keybind["right"].start()
+                    self.keybind["left"].stop()
+                elif self.direction[1] == -1:
+                    self.keybind["left"].start()
+                    self.keybind["right"].stop()
+                else:
+                    self.keybind["right"].stop()
+                    self.keybind["left"].stop()
+
+            
+    class Trigger(Input):
         def __init__(self, name: str, input: int, normal: float = 0, threshold: float = 0):
-            self.name = name
+            super().__init__(name)
             self.input = input
             self.value = 0
             self.normal = normal
             self.threshold = threshold
             self.pressed = False
+            self.last_pressed = False
+            self.keybind = Keybind()
             
         def update(self, joystick: pygame.joystick):
             self.value = joystick.get_axis(self.input)
+            self.last_pressed = self.pressed
             self.pressed = self.value >= self.threshold
+            self.changed = self.last_pressed != self.pressed
+
+            if self.changed:
+                if self.pressed:
+                    self.keybind.start()
+                else:
+                    self.keybind.stop()
             
     def __init__(self):
-        self.input_types = [self.Button, self.Axis, self.Trigger, "DummyButton", "DummyAxis", "DummyTrigger"]
+        self.input_types = [self.Button, self.Axis, self.Trigger, "DummyButton", "DummyAxis", "DummyTrigger"] # Dummy types are used for controllers that don't have buttons or axes in numerical order (cough cough. joycons. cough)
         self.joystick = None
-        self.inputs = {
-            "a": self.Button,
-            "b": self.Button,
-            "x": self.Button,
-            "y": self.Button,
-            "up": self.Button,
-            "down": self.Button,
-            "left": self.Button,
-            "right": self.Button,
-            "LeftStick": self.Axis,
-            "RightStick": self.Axis,
-            "l": self.Button,
-            "r": self.Button,
-            "zl": self.Trigger,
-            "zr": self.Trigger,
-            "start": self.Button,
-            "select": self.Button,
-            "home": self.Button,
-            "capture": self.Button
-        }
+        self.inputs = {}
         self.pressed = []
         self.held = []
         self.released = []
+        self.sticks = []
         
     def set_joystick(self, joystick: pygame.joystick):
         self.joystick = joystick
@@ -91,6 +172,7 @@ class Controller:
                     button_count += 1
                 case self.Axis:
                     self.inputs[key] = input_type(key, axis_count, axis_count + 1, 0.1)
+                    self.sticks.append(self.inputs[key])
                     axis_count += 2
                 case self.Trigger:
                     self.inputs[key] = input_type(key, axis_count, 0, 0)
@@ -106,17 +188,30 @@ class Controller:
         """Poll the controller for input and update the controller's internal state.\n\nRaises an `Exception` if no joystick is set."""
         if not self.joystick:
             raise Exception("No joystick set.")
+        
+        # Reset the lists of pressed, held, and released buttons
         self.pressed = []
         self.held = []
         self.released = []
+        
+        # Dictionaries to store the previous and new states of the inputs
         prev_states = {}
         new_states = {}
-        for key, value in self.inputs.items():
-            if hasattr(value, "pressed"):
-                prev_states[key] = value.pressed
-                value.update(self.joystick)
-                new_states[key] = value.pressed
         
+        # Iterate over all inputs and update their states
+        for key, value in self.inputs.items():
+            # Check if the input has a "pressed" attribute. Applies to buttons and triggers
+            if hasattr(value, "pressed"):
+                # Store the previous state
+                prev_states[key] = value.pressed
+                # Update the input state
+                value.update(self.joystick)
+                # Store the new state
+                new_states[key] = value.pressed
+            else:
+                value.update(self.joystick)
+        
+        # Determine which buttons are pressed, held, or released
         for key, value in new_states.items():
             if value and not prev_states[key]:
                 self.pressed.append(key)
@@ -124,71 +219,3 @@ class Controller:
                 self.released.append(key)
             elif value and prev_states[key]:
                 self.held.append(key)
-
-class Keybind:
-    def __init__(self, name, type, controller_input, **kwargs):
-        self.name = name                                    # The name of this keybind
-        self.type = type                                    # The type of this keybind, can be "button", "axis" or "trigger". bu
-        self.controller_input = controller_input            # The input on the controller that triggers this keybind
-        self.bound_key = None                               # The key bound to this keybind
-        self.is_pressed = False                             # Whether the key is currently pressed on the keyboard
-        self.default = kwargs.get("default", None)          # The default value of the controller input, IE. the output of the controller when the button/axis is not pressed
-        self.deadzone = kwargs.get("deadzone", 0.1)         # The deadzone of the axis
-        self.trigger = kwargs.get("trigger", 0)             # The trigger value of the trigger
-
-    def bind_key(self, key):
-        self.bound_key = self.tkinter_key_to_pynput_key(key) if type(key) != type(Key) else key
-
-    def clear_key(self):
-        self.bound_key = None
-        
-    def poll(self, joystick: pygame.joystick, keyboard: KeyboardController):
-        if not self.bound_key:
-            return
-
-        if self.type == "button":
-            self.input_button(joystick, keyboard)
-        elif self.type == "axis":
-            self.input_axis(joystick, keyboard)
-        elif self.type == "trigger":
-            self.input_trigger(joystick, keyboard)
-            
-    def input_button(self, joystick, keyboard):
-        press = joystick.get_button(self.controller_input)
-        if press and not self.is_pressed:
-            self.simulate_input(keyboard, press=True)
-        elif not press and self.is_pressed:
-            self.simulate_input(keyboard, press=False)
-            
-    def input_axis(self, joystick, keyboard):
-        axis_value = joystick.get_axis(self.controller_input)
-        if abs(axis_value) > 0.1:
-            self.simulate_input(keyboard, press=True)
-        else:
-            self.simulate_input(keyboard, press=False)
-            
-    def input_trigger(self, joystick, keyboard):
-        press = joystick.get_axis(self.controller_input)
-        if press and not self.is_pressed:
-            self.simulate_input(keyboard, press=True)
-        elif not press and self.is_pressed:
-            self.simulate_input(keyboard, press=False)
-
-    def simulate_input(self, keyboard, press=True):
-        try:
-            if press:
-                keyboard.press(self.bound_key)
-                self.is_pressed = True
-            else:
-                keyboard.release(self.bound_key)
-                self.is_pressed = False
-        except Exception as e:
-            print(f"Error simulating input for {self.name}: {e}")
-            
-    def tkinter_key_to_pynput_key(key):
-        if hasattr(Key, key):
-            key = getattr(Key, key, None)
-        else:
-            key_translations = {'escape': Key.esc}
-            key = key_translations.get(key, key)
-        return key

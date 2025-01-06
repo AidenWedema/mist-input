@@ -4,39 +4,33 @@ import pygame
 from pynput.keyboard import Controller as KeyboardController, Key
 from pynput.mouse import Controller as MouseController
 import VirtualController
+from KeyConfigWindow import KeyConfigWindow
 
 class ControllerMapperApp:
     def __init__(self, root):
         # Initialize the main application
         self.root = root
         self.root.title("Mist Input")
+
+        # Initialize pygame for controller input handling
+        pygame.init()
+        
+        # Initialize keyboard and mouse controllers
+        self.keyboard = KeyboardController()
+        self.mouse = MouseController()
         
         self.joystick = None
         self.all_joysticks = []
         self.controller = VirtualController.Controller()
         
-        self.joystick_title = ttk.Label(self.root, text="Controller:", font=("Arial", 14))
-        self.joystick_title.pack(pady=5)
-        self.joystick_text = tk.Text(self.root, height=10, state=tk.DISABLED, wrap=tk.WORD)
-        self.joystick_text.pack(fill=tk.BOTH, padx=10, pady=5)
-        self.joystick_text.insert(tk.END, "Not set")
-        self.joystick_picker = ttk.Combobox(self.root, values=self.all_joysticks)
-        self.joystick_picker.pack(pady=5)
-        self.joystick_picker.bind("<<ComboboxSelected>>", self.set_joystick)
-        self.refresh_button = ttk.Button(self.root, text="Refresh", command=self.check_connected_controllers)
-        self.refresh_button.pack(pady=5)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
 
         self.create_input_screen()
-        
-        # Initialize pygame for controller input handling
-        pygame.init()
+        self.create_keybind_screen()
         
         # Check for connected controllers
         self.check_connected_controllers()
-
-        # Initialize keyboard and mouse controllers
-        self.keyboard = KeyboardController()
-        self.mouse = MouseController()
         
         notebook = ttk.Notebook(self.root)
         notebook.pack(fill=tk.BOTH, expand=True)
@@ -72,22 +66,79 @@ class ControllerMapperApp:
         name = self.joystick_picker.get()
         self.joystick = self.all_joysticks[self.joystick_picker.current()]
         self.controller.set_joystick(self.joystick)
-        self.joystick_text.config(state=tk.NORMAL)
-        self.joystick_text.delete(1.0, tk.END)
-        self.joystick_text.insert(tk.END, name)
-        self.joystick_text.config(state=tk.DISABLED)
+        for key, value in self.controller.inputs.items():
+            self.create_keybind_row(self.notebook.winfo_children()[1], key, value)
     
     def create_input_screen(self):
         """Create the input screen for the application."""
-        # Create a frame for testing controller inputs
-        input_frame = ttk.Frame(self.root)
-        input_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Input")
+        
+        self.joystick_title = ttk.Label(frame, text="Controller:", font=("Arial", 14))
+        self.joystick_title.pack(pady=5)
+        self.joystick_picker = ttk.Combobox(frame, values=self.all_joysticks)
+        self.joystick_picker.pack(pady=5)
+        self.joystick_picker.bind("<<ComboboxSelected>>", self.set_joystick)
+        self.refresh_button = ttk.Button(frame, text="Refresh", command=self.check_connected_controllers)
+        self.refresh_button.pack(pady=5)
 
-        label = ttk.Label(input_frame, text="Controller Input Test", font=("Arial", 14))
+        label = ttk.Label(frame, text="Controller Input Test", font=("Arial", 14))
         label.pack(pady=5)
 
-        self.input_text = tk.Text(input_frame, height=10, state=tk.DISABLED, wrap=tk.WORD)
+        self.input_text = tk.Text(frame, height=10, state=tk.DISABLED, wrap=tk.WORD)
         self.input_text.pack(fill=tk.BOTH, padx=10, pady=5)
+        
+    def create_keybind_screen(self):
+        """Create the keybind screen for the application."""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Keybinds")
+        
+    def create_keybind_row(self, frame, name, input):
+        row = ttk.Frame(frame)
+        row.pack(fill=tk.X, padx=10, pady=2)
+
+        label = ttk.Label(row, text=name, width=15)
+        label.pack(side=tk.LEFT)
+
+        entry = ttk.Entry(row, width=15, state="readonly", justify="center")
+        entry.pack(side=tk.LEFT, padx=5)
+    
+        def start_listening():
+            entry.config(state="normal")
+            entry.delete(0, tk.END)
+            entry.insert(0, f"...")
+            entry.config(state="readonly")
+            self.root.bind_all("<KeyPress>", on_key_press)
+
+        def on_key_press(event):
+            key_name = event.keysym
+            input.keybind.bind_key(key_name)
+            entry.config(state="normal")
+            entry.delete(0, tk.END)
+            entry.insert(0, key_name)
+            entry.config(state="readonly")
+            self.root.unbind_all("<KeyPress>")
+
+        button = ttk.Button(row, text="Bind", command=start_listening)
+        button.pack(side=tk.LEFT, padx=5)
+        
+        def clear_binding():
+            entry.config(state="normal")
+            entry.delete(0, tk.END)
+            entry.config(state="readonly")
+            input.keybind.clear_key()
+
+        clear_button = ttk.Button(row, text="Clear", command=clear_binding)
+        clear_button.pack(side=tk.LEFT, padx=5)
+        
+        def open_advanced_keybind_window(input):
+            adv_window = tk.Toplevel(self.root)
+            adv_window.grab_set()            # Make this window modal
+            adv_window.transient(self.root)  # Set parent to main window
+            KeyConfigWindow(adv_window, input)
+        
+        edit_button = ttk.Button(row, text="Edit", command=lambda: open_advanced_keybind_window(input.keybind))
+        edit_button.pack(side=tk.LEFT, padx=5)
         
     def poll_controller(self):
         """Poll the controller for input and send it to the keyboard and mouse."""
@@ -97,6 +148,12 @@ class ControllerMapperApp:
             
             # Poll the controller for input
             self.controller.poll()
+            
+            for button in self.controller.pressed:
+                pass
+                
+            for button in self.controller.released:
+                pass
                 
             for button in self.controller.held:
                 output_lines.append(f"Button {button} held")
@@ -105,6 +162,9 @@ class ControllerMapperApp:
             # for i in range(self.joystick.get_numbuttons()):
             #     if self.joystick.get_button(i):
             #         output_lines.append(f"Button {i} pressed")
+            
+            for axis in self.controller.sticks:
+                output_lines.append(f"{axis.name} at position {axis.X:.2f}, {axis.Y:.2f} {axis.direction}")
             
             # Display input in the test screen
             self.input_text.config(state=tk.NORMAL)
