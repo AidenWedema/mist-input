@@ -67,7 +67,11 @@ class ControllerMapperApp:
         self.joystick = self.all_joysticks[self.joystick_picker.current()]
         self.controller.set_joystick(self.joystick)
         for key, value in self.controller.inputs.items():
-            self.create_keybind_row(self.notebook.winfo_children()[1], key, value)
+            if hasattr(value, "pressed"):
+                self.create_keybind_row(self.notebook.winfo_children()[1], key, value.keybind)
+            else:
+                for k, v in value.keybind.items():
+                    self.create_keybind_row(self.notebook.winfo_children()[1], f"{key} {k}", v)
     
     def create_input_screen(self):
         """Create the input screen for the application."""
@@ -93,7 +97,7 @@ class ControllerMapperApp:
         frame = ttk.Frame(self.notebook)
         self.notebook.add(frame, text="Keybinds")
         
-    def create_keybind_row(self, frame, name, input):
+    def create_keybind_row(self, frame, name, keybind):
         row = ttk.Frame(frame)
         row.pack(fill=tk.X, padx=10, pady=2)
 
@@ -112,7 +116,7 @@ class ControllerMapperApp:
 
         def on_key_press(event):
             key_name = event.keysym
-            input.keybind.bind_key(key_name)
+            keybind.bind_key(key_name)
             entry.config(state="normal")
             entry.delete(0, tk.END)
             entry.insert(0, key_name)
@@ -126,19 +130,26 @@ class ControllerMapperApp:
             entry.config(state="normal")
             entry.delete(0, tk.END)
             entry.config(state="readonly")
-            input.keybind.clear_key()
+            keybind.clear_key()
 
         clear_button = ttk.Button(row, text="Clear", command=clear_binding)
         clear_button.pack(side=tk.LEFT, padx=5)
         
         def open_advanced_keybind_window(input):
             adv_window = tk.Toplevel(self.root)
-            adv_window.grab_set()            # Make this window modal
-            adv_window.transient(self.root)  # Set parent to main window
-            KeyConfigWindow(adv_window, input)
+            adv_window.grab_set()
+            adv_window.transient(self.root)
+            KeyConfigWindow(adv_window, input, entry)
         
-        edit_button = ttk.Button(row, text="Edit", command=lambda: open_advanced_keybind_window(input.keybind))
+        edit_button = ttk.Button(row, text="Edit", command=lambda: open_advanced_keybind_window(keybind))
         edit_button.pack(side=tk.LEFT, padx=5)
+        
+        while_pressed_var = tk.BooleanVar(value=False)
+        def toggle_while_pressed():
+            keybind.while_pressed = while_pressed_var.get()
+
+        while_pressed_check = ttk.Checkbutton(row, text="Turbo", variable=while_pressed_var, command=toggle_while_pressed)
+        while_pressed_check.pack(side=tk.LEFT, padx=5)
         
     def poll_controller(self):
         """Poll the controller for input and send it to the keyboard and mouse."""
