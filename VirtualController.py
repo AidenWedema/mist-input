@@ -2,6 +2,7 @@ import pygame
 from pynput.keyboard import Controller as KeyboardController, Key
 from pynput.mouse import Controller as MouseController, Button
 from ControllerLayouts import GetControllerLayout
+import json
 
 class Keybind:
     def __init__(self, keyboard: KeyboardController=KeyboardController(), mouse: MouseController=MouseController()):
@@ -10,6 +11,7 @@ class Keybind:
         self.while_pressed = False                          # Whether the key should be pressed repeatedly while self.is_pressed is True
         self.keyboard = keyboard                            # The keyboard controller to use for simulating input
         self.mouse = mouse                                  # The mouse controller to use for simulating input
+        self.key_translations = {'m_left': Button.left, 'm_right': Button.right, 'm_middle': Button.middle, 'escape': Key.esc, 'return': Key.enter}
 
     def bind_key(self, key):
         pynput_key = self.tkinter_key_to_pynput_key(key)# if type(key) != type(Key) else key
@@ -74,15 +76,28 @@ class Keybind:
                 if hasattr(Button, key):
                     key = getattr(Button, key, None)
                 else:
-                    key_translations = {'m_left': Button.left, 'm_right': Button.right, 'm_middle': Button.middle}
-                    key = key_translations.get(key, key)
+                    key = self.key_translations.get(key, key)
         else:
             if hasattr(Key, key):
                 key = getattr(Key, key, None)
             else:
-                key_translations = {'escape': Key.esc, 'return': Key.enter}
-                key = key_translations.get(key, key)
+                key = self.key_translations.get(key, key)
         return key
+    
+    def pynput_keys_to_tkinter_keys(self, keys):
+        reverse_translations = {v: k for k, v in self.key_translations.items()}
+        reverse_translations.update({Key.space: 'space', Key.alt: 'alt', Key.tab: 'tab', Key.shift: 'shift'})
+        if type(keys) == dict:
+            for k, v in keys.items():
+                if type(v) == Key or type(v) == Button:
+                    keys[k] = reverse_translations[v]
+        else:
+            for i in range(len(keys)):
+                key = keys[i]
+                if type(key) == Key or type(key) == Button:
+                    keys[i] = reverse_translations[key]
+        return keys
+            
 
 class Controller:
     class Input:
@@ -271,3 +286,58 @@ class Controller:
                 self.released.append(key)
             elif value and prev_states[key]:
                 self.held.append(key)
+                
+    def save_keybindings(self, layout_name, filename="keybindings.json"):
+        try:
+            with open(filename, "r") as f:
+                all_keybindings = json.load(f)
+        except FileNotFoundError:
+            all_keybindings = {}
+
+        controller_name = self.joystick.get_name()
+        if controller_name not in all_keybindings:
+            all_keybindings[controller_name] = {}
+
+        keybindings = {}
+        for key, input in self.inputs.items():
+            if isinstance(input, self.Axis):
+                keybindings[key] = {k: v.bound_keys for k, v in input.keybind.items()}
+            else:
+                keybindings[key] = input.keybind.bound_keys
+
+        serialised_keybindings = {k: Keybind().pynput_keys_to_tkinter_keys(v) for k, v in keybindings.items()}
+        all_keybindings[controller_name][layout_name] = serialised_keybindings
+
+        with open(filename, "w") as f:
+            json.dump(all_keybindings, f, indent=4)
+
+    def load_keybindings(self, layout_name, filename="keybindings.json"):
+        try:
+            with open(filename, "r") as f:
+                all_keybindings = json.load(f)
+            controller_name = self.joystick.get_name()
+            if controller_name in all_keybindings and layout_name in all_keybindings[controller_name]:
+                keybindings = all_keybindings[controller_name][layout_name]
+                for key, bound_keys in keybindings.items():
+                    if key in self.inputs:
+                        if isinstance(self.inputs[key], self.Axis):
+                            for k, v in bound_keys.items():
+                                for bound_key in v:
+                                    self.inputs[key].keybind[k].bind_key(bound_key)
+                        else:
+                            for bound_key in bound_keys:
+                                self.inputs[key].keybind.bind_key(bound_key)
+        except FileNotFoundError:
+            pass
+        
+    def load_all_layout_names(self, filename="keybindings.json"):
+        try:
+            with open(filename, "r") as f:
+                all_keybindings = json.load(f)
+            controller_name = self.joystick.get_name()
+            if controller_name in all_keybindings:
+                keybindings = all_keybindings[controller_name]
+                names = list(keybindings.keys())
+                return names
+        except FileNotFoundError:
+            pass

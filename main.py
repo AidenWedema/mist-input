@@ -25,20 +25,25 @@ class ControllerMapperApp:
         
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True)
+        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_change)
 
         self.create_input_screen()
         self.create_keybind_screen()
+        self.create_saved_screen()
         
         # Check for connected controllers
         self.check_connected_controllers()
-        
-        notebook = ttk.Notebook(self.root)
-        notebook.pack(fill=tk.BOTH, expand=True)
         
         # Refresh rate in milliseconds
         self.refresh_rate = 10
         
         self.poll_controller()
+        
+    def on_tab_change(self, event):
+        """Handle tab change event."""
+        selected_tab = event.widget.tab(event.widget.index("current"), "text")
+        if selected_tab == "Saved":
+            self.notebook.winfo_children()[2].winfo_children()[0].winfo_children()[0].config(values=self.controller.load_all_layout_names())
         
     def check_connected_controllers(self):
         """Check for connected controllers and display them in the text box."""
@@ -97,14 +102,14 @@ class ControllerMapperApp:
         frame = ttk.Frame(self.notebook)
         self.notebook.add(frame, text="Keybinds")
         
-    def create_keybind_row(self, frame, name, keybind):
+    def create_keybind_row(self, frame, name, keybind, text=""):
         row = ttk.Frame(frame)
         row.pack(fill=tk.X, padx=10, pady=2)
 
         label = ttk.Label(row, text=name, width=15)
         label.pack(side=tk.LEFT)
 
-        entry = ttk.Entry(row, width=15, state="readonly", justify="center")
+        entry = ttk.Entry(row, width=15, state="readonly", justify="center", text=text)
         entry.pack(side=tk.LEFT, padx=5)
     
         def start_listening():
@@ -150,6 +155,20 @@ class ControllerMapperApp:
 
         while_pressed_check = ttk.Checkbutton(row, text="Turbo", variable=while_pressed_var, command=toggle_while_pressed)
         while_pressed_check.pack(side=tk.LEFT, padx=5)
+        
+    def create_saved_screen(self):
+        """Create the saved keybinds screen for the application."""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Saved")
+        
+        row = ttk.Frame(frame)
+        row.pack(fill=tk.X, padx=10, pady=2)
+        all_saved = ttk.Combobox(row, text="All")
+        all_saved.pack(side=tk.LEFT, padx=5)
+        save_button = ttk.Button(row, text="Save", command=lambda: self.controller.save_keybindings(all_saved.get()))
+        save_button.pack(side=tk.LEFT, padx=5)
+        load_button = ttk.Button(row, text="Load", command=lambda: self.controller.load_keybindings(all_saved.get()))
+        load_button.pack(side=tk.LEFT, padx=5)
         
     def poll_controller(self):
         """Poll the controller for input and send it to the keyboard and mouse."""
